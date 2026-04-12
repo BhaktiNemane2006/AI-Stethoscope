@@ -4,5 +4,4 @@ scipy
 matplotlib
 librosa
 scikit-learn
-sounddevice
 reportlab
