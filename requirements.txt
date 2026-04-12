@@ -3,7 +3,6 @@ numpy
 scipy
 matplotlib
 librosa
-tensorflow
 scikit-learn
 sounddevice
 reportlab
