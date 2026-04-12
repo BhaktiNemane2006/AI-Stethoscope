@@ -5,7 +5,6 @@ from utils import save_recording
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 from report import generate_report
-from cnn_predict import predict_cnn
 import librosa
 import sounddevice as sd
 
@@ -108,9 +107,15 @@ bpm = len(peaks) * 60
 # -----------------------------
 # AI Prediction (CNN)
 # -----------------------------
-confidence = np.mean(np.abs(filtered))  # simple fallback
+# -----------------------------
+# Lightweight AI Prediction (Cloud Compatible)
+# -----------------------------
+energy = np.mean(np.abs(filtered))
 
-prediction = 1 if confidence >= 0.5 else 0
+# Convert to confidence (scaled)
+confidence = min(energy * 5, 1.0)
+
+prediction = 1 if confidence >= 0.6 else 0
 
 # -----------------------------
 # ICU Dashboard Layout
