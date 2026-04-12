@@ -6,20 +6,7 @@ from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 from report import generate_report
 import librosa
-import sounddevice as sd
 
-if st.button("🎤 Record from Mic"):
-    st.info("Recording...")
-
-    duration = 3  # seconds
-    fs = 1000
-
-    audio = sd.rec(int(duration * fs), samplerate=fs, channels=1)
-    sd.wait()
-
-    raw_data = audio.flatten()
-
-    st.success("Recording complete!")
 # -----------------------------
 # File Upload
 # -----------------------------
