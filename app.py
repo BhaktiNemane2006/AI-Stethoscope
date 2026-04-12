@@ -108,7 +108,7 @@ bpm = len(peaks) * 60
 # -----------------------------
 # AI Prediction (CNN)
 # -----------------------------
-confidence = predict_cnn(filtered)
+confidence = np.mean(np.abs(filtered))  # simple fallback
 
 prediction = 1 if confidence >= 0.5 else 0
 
