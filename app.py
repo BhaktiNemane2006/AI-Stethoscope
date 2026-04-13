@@ -11,9 +11,60 @@ import av
 import csv
 import os
 import pandas as pd
+st.subheader("🧠 AI Confidence Level")
+
+st.progress(float(confidence))
+
+if confidence > 0.8:
+    st.success("High confidence prediction")
+elif confidence > 0.5:
+    st.warning("Moderate confidence")
+else:
+    st.error("Low confidence")
 
 st.set_page_config(layout="wide")
+st.subheader("📡 Signal Quality")
 
+if noise < 0.1:
+    st.success("Excellent signal quality")
+elif noise < 0.3:
+    st.warning("Moderate noise")
+else:
+    st.error("Poor signal, adjust sensor")
+st.subheader("🫀 Heart Beat Markers")
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+ax.plot(filtered)
+
+for p in peaks[:10]:
+    ax.axvline(p, color='red')
+
+st.pyplot(fig)
+st.subheader("📋 Patient Summary")
+
+st.info(f"""
+Name: {name}  
+Age: {age}  
+Condition: {label}  
+BPM: {bpm}  
+Arrhythmia: {"Yes" if arrhythmia else "No"}
+""")
+st.subheader("🩺 Final Clinical Decision")
+
+if label == "Normal" and not arrhythmia:
+    st.success("✔ No immediate concern")
+elif label == "Murmur":
+    st.warning("⚠ Further investigation required")
+else:
+    st.error("🚨 Immediate medical attention recommended")
+    st.markdown(
+    "<h3 style='color:red;'>● LIVE MONITORING</h3>",
+    unsafe_allow_html=True
+)
+with st.spinner("Analyzing heart signal..."):
+    time.sleep(1)
 # -----------------------------
 # SAVE HISTORY FUNCTION
 # -----------------------------
