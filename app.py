@@ -10,23 +10,36 @@ from streamlit_webrtc import webrtc_streamer
 
 # -----------------------------
 # AUDIO BUFFER
-# -----------------------------
-if "audio_buffer" not in st.session_state:
-    st.session_state.audio_buffer = []
-
-def audio_callback(frame):
-    audio = frame.to_ndarray().flatten()
-    st.session_state.audio_buffer.extend(audio.tolist())
-    st.session_state.audio_buffer = st.session_state.audio_buffer[-2000:]
-    return frame
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
+import av
 
 st.subheader("🎤 Live Mic (Browser)")
-webrtc_streamer(
+
+if "audio_data" not in st.session_state:
+    st.session_state.audio_data = np.array([])
+
+def audio_callback(frame: av.AudioFrame):
+    audio = frame.to_ndarray().flatten().astype(np.float32)
+
+    # normalize
+    audio = audio / (np.max(np.abs(audio)) + 1e-6)
+
+    # store in session
+    st.session_state.audio_data = np.concatenate(
+        (st.session_state.audio_data, audio)
+    )
+
+    # keep only last 2 sec
+    st.session_state.audio_data = st.session_state.audio_data[-2000:]
+
+    return frame
+
+webrtc_ctx = webrtc_streamer(
     key="mic",
+    mode=WebRtcMode.SENDONLY,
     audio_frame_callback=audio_callback,
     media_stream_constraints={"audio": True, "video": False},
 )
-
 # -----------------------------
 # DATABASE
 # -----------------------------
@@ -91,15 +104,18 @@ gender = st.sidebar.selectbox("Gender", ["Male","Female","Other"])
 # -----------------------------
 uploaded_file = st.file_uploader("Upload (.wav)", type=["wav"])
 
-if len(st.session_state.audio_buffer) > 500:
-    raw = np.array(st.session_state.audio_buffer)
+if len(st.session_state.audio_data) > 500:
+    raw = st.session_state.audio_data
+
 elif uploaded_file:
     y, sr = librosa.load(uploaded_file, sr=1000)
     raw = y[:2000]
+
 else:
     t = np.linspace(0,1,300)
     raw = np.sin(2*np.pi*2*t)
-
+if st.button("🔄 Refresh Signal"):
+    st.rerun()
 # -----------------------------
 # FILTER
 # -----------------------------
