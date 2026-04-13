@@ -4,8 +4,41 @@ from signal_processing import bandpass
 from utils import save_recording
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
-from report import generate_report
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
+from reportlab.lib.styles import getSampleStyleSheet
 import librosa
+import os
+import time
+
+# -----------------------------
+# Login System
+# -----------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.title("🔐 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username == "admin" and password == "1234":
+            st.session_state.logged_in = True
+        else:
+            st.error("Invalid credentials")
+    st.stop()
+
+# -----------------------------
+# UI STYLE (ICU)
+# -----------------------------
+st.markdown("""
+<style>
+body {background-color:black; color:#00FF00;}
+.stApp {background-color:black;}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("💓 ICU Heart Monitor")
 
 # -----------------------------
 # File Upload
@@ -13,150 +46,138 @@ import librosa
 uploaded_file = st.file_uploader("Upload Heart Sound (.wav)", type=["wav"])
 
 # -----------------------------
-# Styling
-# -----------------------------
-st.markdown("""
-<style>
-body {
-    background-color: black;
-    color: #00FF00;
-}
-.stMetric {
-    font-size: 30px !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# -----------------------------
-# Sidebar (Patient Info)
+# Patient Info
 # -----------------------------
 st.sidebar.title("🧑‍⚕️ Patient Info")
-
 patient_name = st.sidebar.text_input("Name")
 age = st.sidebar.number_input("Age", 1, 120)
-gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
-
-mode = st.sidebar.radio("Select Mode", ["Demo", "Real (ESP32)"])
 
 # -----------------------------
-# Title
-# -----------------------------
-st.title("💓 AI Digital Stethoscope")
-
-# -----------------------------
-# Fake Signal Generator
+# Signal
 # -----------------------------
 def generate_heart_signal():
     t = np.linspace(0, 1, 300)
-    signal = (
-        np.sin(2 * np.pi * 2 * t) * 0.2 +
-        np.exp(-((t-0.2)*30)**2) * 2 +
-        np.exp(-((t-0.6)*30)**2) * 1.5
-    )
-    noise = np.random.normal(0, 0.1, 300)
-    return signal + noise
+    return np.sin(2*np.pi*2*t) + np.random.normal(0,0.1,300)
 
-# -----------------------------
-# Get Data
-# -----------------------------
-if uploaded_file is not None:
-    st.success("📁 File uploaded successfully")
-
+if uploaded_file:
     y, sr = librosa.load(uploaded_file, sr=1000)
-    raw_data = y[:2000]   # FIXED length
-
-elif mode == "Demo":
+    raw_data = y[:2000]
+else:
     raw_data = generate_heart_signal()
 
-else:
-    from serial_reader import read_serial
-    raw_data = []
-
-    for _ in range(300):
-        val = read_serial()
-        if val is not None:
-            raw_data.append(val)
-
-# -----------------------------
-# Process Signal
-# -----------------------------
 filtered = bandpass(np.array(raw_data))
-
-# ✅ NORMALIZATION (VERY IMPORTANT)
-filtered = filtered / np.max(np.abs(filtered) + 1e-6)
+filtered = filtered / (np.max(np.abs(filtered)) + 1e-6)
 
 # -----------------------------
-# Calculate BPM
+# BPM
 # -----------------------------
 peaks, _ = find_peaks(filtered, distance=50, height=0.2)
 bpm = len(peaks) * 60
 
 # -----------------------------
-# AI Prediction (CNN)
+# Improved AI (better logic)
 # -----------------------------
-# -----------------------------
-# Lightweight AI Prediction (Cloud Compatible)
-# -----------------------------
+variance = np.var(filtered)
 energy = np.mean(np.abs(filtered))
 
-# Convert to confidence (scaled)
-confidence = min(energy * 5, 1.0)
+confidence = min((energy + variance) * 3, 1.0)
 
-prediction = 1 if confidence >= 0.6 else 0
+prediction = "Normal" if confidence < 0.6 else "Abnormal"
 
 # -----------------------------
-# ICU Dashboard Layout
+# Dashboard
 # -----------------------------
-st.markdown("## 🩺 ICU Heart Monitor")
+col1, col2 = st.columns(2)
 
-col1, col2, col3 = st.columns(3)
+col1.metric("❤️ BPM", bpm)
 
-col1.metric("❤️ Heart Rate", f"{bpm} BPM")
-
-# ✅ IMPROVED THRESHOLD
-if confidence < 0.6:
+if prediction == "Normal":
     col2.success("🟢 Normal")
-elif confidence < 0.8:
-    col2.warning("🟡 Risk")
 else:
     col2.error("🔴 Abnormal")
 
-col3.metric("📡 Signal Status", "Active")
+st.metric("🧠 Confidence", f"{confidence*100:.2f}%")
 
 # -----------------------------
-# Show Confidence
+# Probability Graph
 # -----------------------------
-st.metric("🧠 AI Confidence", f"{confidence*100:.2f}%")
-st.write("Raw Confidence:", confidence)  # debug
+st.subheader("📊 AI Probability")
+st.bar_chart({"Normal":1-confidence, "Abnormal":confidence})
 
 # -----------------------------
-# Waveform (FIXED)
+# Doctor Recommendation
 # -----------------------------
-st.subheader("📈 Heart Waveform")
-st.line_chart(filtered)
+st.subheader("🧑‍⚕️ Recommendation")
+
+if confidence < 0.6:
+    st.success("Healthy heart. Maintain lifestyle.")
+else:
+    st.error("Consult cardiologist immediately.")
+
+# -----------------------------
+# Waveform Animation (ICU)
+# -----------------------------
+st.subheader("📈 Live Waveform")
+placeholder = st.empty()
+
+for _ in range(10):
+    placeholder.line_chart(generate_heart_signal())
+    time.sleep(0.1)
 
 # -----------------------------
 # Spectrogram
 # -----------------------------
 st.subheader("📊 Spectrogram")
-
 fig, ax = plt.subplots()
 ax.specgram(filtered, Fs=1000)
-ax.set_title("Spectrogram")
 st.pyplot(fig)
 
 # -----------------------------
-# Save Recording
+# MULTIPLE PATIENT RECORDS
 # -----------------------------
-if st.button("🔴 Record & Save"):
-    file = save_recording(filtered, patient_name)
-    st.success(f"Saved: {file}")
+if "records" not in st.session_state:
+    st.session_state.records = []
+
+if st.button("💾 Save Patient Record"):
+    st.session_state.records.append({
+        "name": patient_name,
+        "bpm": bpm,
+        "status": prediction
+    })
+
+st.subheader("📁 Patient Records")
+
+for r in st.session_state.records:
+    st.write(r)
 
 # -----------------------------
-# Generate Report
+# PDF REPORT WITH GRAPH
 # -----------------------------
+def generate_pdf(name, bpm, status):
+    filename = f"{name}_report.pdf"
+
+    doc = SimpleDocTemplate(filename)
+    styles = getSampleStyleSheet()
+
+    content = []
+    content.append(Paragraph(f"Patient: {name}", styles["Normal"]))
+    content.append(Paragraph(f"BPM: {bpm}", styles["Normal"]))
+    content.append(Paragraph(f"Condition: {status}", styles["Normal"]))
+
+    # Save graph image
+    img_path = "temp_plot.png"
+    plt.figure()
+    plt.plot(filtered)
+    plt.savefig(img_path)
+    plt.close()
+
+    content.append(Image(img_path, width=300, height=150))
+
+    doc.build(content)
+    return filename
+
 if st.button("📄 Generate Report"):
-    status = "Normal" if prediction == 0 else "Abnormal"
-    file = generate_report(patient_name, bpm, status, confidence)
-    st.success(f"Report saved: {file}")
+    file = generate_pdf(patient_name, bpm, prediction)
+    with open(file, "rb") as f:
+        st.download_button("⬇ Download Report", f, file_name=file)
     
