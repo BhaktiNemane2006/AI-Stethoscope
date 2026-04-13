@@ -6,13 +6,33 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, butter, filtfilt
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
 from reportlab.lib.styles import getSampleStyleSheet
-from streamlit_webrtc import webrtc_streamer
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
+import av
+import csv
+import os
+import pandas as pd
+
+st.set_page_config(layout="wide")
+
+# -----------------------------
+# SAVE HISTORY FUNCTION
+# -----------------------------
+def save_history():
+    file = "history.csv"
+    header = ["Name","Age","Gender","BPM","Condition"]
+    data = [name, age, gender, bpm, label]
+
+    file_exists = os.path.isfile(file)
+
+    with open(file, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(header)
+        writer.writerow(data)
 
 # -----------------------------
 # AUDIO BUFFER
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import av
-
+# -----------------------------
 st.subheader("🎤 Live Mic (Browser)")
 
 if "audio_data" not in st.session_state:
@@ -20,26 +40,22 @@ if "audio_data" not in st.session_state:
 
 def audio_callback(frame: av.AudioFrame):
     audio = frame.to_ndarray().flatten().astype(np.float32)
-
-    # normalize
     audio = audio / (np.max(np.abs(audio)) + 1e-6)
 
-    # store in session
     st.session_state.audio_data = np.concatenate(
         (st.session_state.audio_data, audio)
     )
 
-    # keep only last 2 sec
     st.session_state.audio_data = st.session_state.audio_data[-2000:]
-
     return frame
 
-webrtc_ctx = webrtc_streamer(
+webrtc_streamer(
     key="mic",
     mode=WebRtcMode.SENDONLY,
     audio_frame_callback=audio_callback,
     media_stream_constraints={"audio": True, "video": False},
 )
+
 # -----------------------------
 # DATABASE
 # -----------------------------
@@ -79,7 +95,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # -----------------------------
-# UI STYLE
+# UI
 # -----------------------------
 st.markdown("""
 <style>
@@ -106,16 +122,13 @@ uploaded_file = st.file_uploader("Upload (.wav)", type=["wav"])
 
 if len(st.session_state.audio_data) > 500:
     raw = st.session_state.audio_data
-
 elif uploaded_file:
     y, sr = librosa.load(uploaded_file, sr=1000)
     raw = y[:2000]
-
 else:
     t = np.linspace(0,1,300)
     raw = np.sin(2*np.pi*2*t)
-if st.button("🔄 Refresh Signal"):
-    st.rerun()
+
 # -----------------------------
 # FILTER
 # -----------------------------
@@ -137,18 +150,32 @@ else:
     bpm = 0
 
 # -----------------------------
+# ARRHYTHMIA DETECTION
+# -----------------------------
+arrhythmia = False
+
+if len(peaks) > 2:
+    rr_intervals = np.diff(peaks)
+    variability = np.std(rr_intervals)
+
+    if variability > 50:
+        arrhythmia = True
+
+if arrhythmia:
+    st.warning("⚠ Irregular Heart Rhythm Detected")
+
+# -----------------------------
 # FEATURES
 # -----------------------------
-energy = np.mean(np.abs(filtered))
 variance = np.var(filtered)
 noise = np.std(filtered)
 
 # -----------------------------
-# PCG CLASSIFICATION
+# CLASSIFICATION
 # -----------------------------
-if bpm<50 or bpm>130:
+if bpm < 50 or bpm > 130:
     label = "Extrastole"
-elif variance>0.5:
+elif variance > 0.5:
     label = "Murmur"
 else:
     label = "Normal"
@@ -159,9 +186,24 @@ else:
 if label=="Normal":
     status="🟢 Normal"
 elif label=="Murmur":
-    status="🟡 Murmur Detected"
+    status="🟡 Murmur"
 else:
-    status="🔴 Abnormal Rhythm"
+    status="🔴 Abnormal"
+
+# -----------------------------
+# DOCTOR RECOMMENDATION
+# -----------------------------
+st.subheader("🧑‍⚕️ Doctor Recommendation")
+
+if label == "Normal":
+    st.success("Healthy heart. Maintain lifestyle.")
+elif label == "Murmur":
+    st.warning("Possible murmur. Get echo test.")
+else:
+    st.error("Consult cardiologist immediately.")
+
+if arrhythmia:
+    st.error("Possible Arrhythmia detected.")
 
 # -----------------------------
 # DASHBOARD
@@ -172,28 +214,46 @@ c1.metric("❤️ BPM", bpm)
 c2.metric("Noise", f"{noise:.2f}")
 c3.metric("Condition", label)
 
-st.success(status if label=="Normal" else status)
+# -----------------------------
+# SAVE + HISTORY
+# -----------------------------
+if st.button("💾 Save Record"):
+    save_history()
+    st.success("Saved!")
+
+st.subheader("📂 Patient History")
+
+if os.path.exists("history.csv"):
+    df = pd.read_csv("history.csv")
+    st.dataframe(df)
 
 # -----------------------------
 # WAVEFORM
 # -----------------------------
 st.subheader("📈 Waveform")
-st.line_chart(filtered)
+st.line_chart(filtered[-300:])
+
+# -----------------------------
+# ADVANCED GRAPHS
+# -----------------------------
+st.subheader("📊 Advanced Analysis")
+
+colA, colB = st.columns(2)
+
+fft = np.abs(np.fft.fft(filtered))
+with colA:
+    st.line_chart(fft[:200])
+
+rolling = np.convolve(np.abs(filtered), np.ones(50)/50, mode='same')
+with colB:
+    st.line_chart(rolling)
 
 # -----------------------------
 # SPECTROGRAM
 # -----------------------------
-st.subheader("📊 Spectrogram")
-
 fig,ax = plt.subplots()
 ax.specgram(filtered,Fs=1000)
 st.pyplot(fig)
-
-# -----------------------------
-# MURMUR ALERT
-# -----------------------------
-if label=="Murmur":
-    st.warning("⚠ Possible murmur detected")
 
 # -----------------------------
 # PDF REPORT
@@ -209,6 +269,7 @@ def generate_pdf():
     content.append(Paragraph(f"Gender: {gender}",styles["Normal"]))
     content.append(Paragraph(f"BPM: {bpm}",styles["Normal"]))
     content.append(Paragraph(f"Condition: {label}",styles["Normal"]))
+    content.append(Paragraph(f"Recommendation: {status}",styles["Normal"]))
 
     img="plot.png"
     plt.figure()
