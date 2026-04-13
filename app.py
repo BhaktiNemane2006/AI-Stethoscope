@@ -11,57 +11,9 @@ import av
 import csv
 import os
 import pandas as pd
+import time
 
-
-st.subheader("🫀 Heart Beat Markers")
-
-import matplotlib.pyplot as plt
-
-fig, ax = plt.subplots()
-ax.plot(filtered)
-
-for p in peaks[:10]:
-    ax.axvline(p, color='red')
-
-st.pyplot(fig)
-st.subheader("📋 Patient Summary")
-
-st.info(f"""
-Name: {name}  
-Age: {age}  
-Condition: {label}  
-BPM: {bpm}  
-Arrhythmia: {"Yes" if arrhythmia else "No"}
-""")
-st.subheader("🩺 Final Clinical Decision")
-
-if label == "Normal" and not arrhythmia:
-    st.success("✔ No immediate concern")
-elif label == "Murmur":
-    st.warning("⚠ Further investigation required")
-else:
-    st.error("🚨 Immediate medical attention recommended")
-    st.markdown(
-    "<h3 style='color:red;'>● LIVE MONITORING</h3>",
-    unsafe_allow_html=True
-)
-with st.spinner("Analyzing heart signal..."):
-    time.sleep(1)
-# -----------------------------
-# SAVE HISTORY FUNCTION
-# -----------------------------
-def save_history():
-    file = "history.csv"
-    header = ["Name","Age","Gender","BPM","Condition"]
-    data = [name, age, gender, bpm, label]
-
-    file_exists = os.path.isfile(file)
-
-    with open(file, "a", newline="") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(header)
-        writer.writerow(data)
+st.set_page_config(layout="wide")
 
 # -----------------------------
 # AUDIO BUFFER
@@ -78,7 +30,6 @@ def audio_callback(frame: av.AudioFrame):
     st.session_state.audio_data = np.concatenate(
         (st.session_state.audio_data, audio)
     )
-
     st.session_state.audio_data = st.session_state.audio_data[-2000:]
     return frame
 
@@ -183,7 +134,20 @@ else:
     bpm = 0
 
 # -----------------------------
-# ARRHYTHMIA DETECTION
+# HEART BEAT MARKERS (FIXED)
+# -----------------------------
+st.subheader("🫀 Heart Beat Markers")
+
+fig, ax = plt.subplots()
+ax.plot(filtered)
+
+for p in peaks[:10]:
+    ax.axvline(p, color='red')
+
+st.pyplot(fig)
+
+# -----------------------------
+# ARRHYTHMIA
 # -----------------------------
 arrhythmia = False
 
@@ -202,8 +166,9 @@ if arrhythmia:
 # -----------------------------
 variance = np.var(filtered)
 noise = np.std(filtered)
+
 # -----------------------------
-# SIGNAL QUALITY (NOW SAFE)
+# SIGNAL QUALITY
 # -----------------------------
 st.subheader("📡 Signal Quality")
 
@@ -212,7 +177,8 @@ if noise < 0.1:
 elif noise < 0.3:
     st.warning("Moderate noise")
 else:
-    st.error("Poor signal, adjust sensor")
+    st.error("Poor signal")
+
 # -----------------------------
 # CLASSIFICATION
 # -----------------------------
@@ -258,12 +224,28 @@ c2.metric("Noise", f"{noise:.2f}")
 c3.metric("Condition", label)
 
 # -----------------------------
-# SAVE + HISTORY
+# SAVE HISTORY
 # -----------------------------
+def save_history():
+    file = "history.csv"
+    header = ["Name","Age","Gender","BPM","Condition"]
+    data = [name, age, gender, bpm, label]
+
+    file_exists = os.path.isfile(file)
+
+    with open(file, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(header)
+        writer.writerow(data)
+
 if st.button("💾 Save Record"):
     save_history()
     st.success("Saved!")
 
+# -----------------------------
+# HISTORY
+# -----------------------------
 st.subheader("📂 Patient History")
 
 if os.path.exists("history.csv"):
@@ -299,7 +281,37 @@ ax.specgram(filtered,Fs=1000)
 st.pyplot(fig)
 
 # -----------------------------
-# PDF REPORT
+# SUMMARY
+# -----------------------------
+st.subheader("📋 Patient Summary")
+
+st.info(f"""
+Name: {name}  
+Age: {age}  
+Condition: {label}  
+BPM: {bpm}  
+Arrhythmia: {"Yes" if arrhythmia else "No"}
+""")
+
+# -----------------------------
+# FINAL DECISION
+# -----------------------------
+st.subheader("🩺 Final Clinical Decision")
+
+if label == "Normal" and not arrhythmia:
+    st.success("✔ No immediate concern")
+elif label == "Murmur":
+    st.warning("⚠ Further investigation required")
+else:
+    st.error("🚨 Immediate medical attention recommended")
+
+st.markdown(
+    "<h3 style='color:red;'>● LIVE MONITORING</h3>",
+    unsafe_allow_html=True
+)
+
+# -----------------------------
+# REPORT
 # -----------------------------
 def generate_pdf():
     file=f"{name}_report.pdf"
@@ -325,9 +337,6 @@ def generate_pdf():
 
     return file
 
-# -----------------------------
-# DOWNLOAD REPORT
-# -----------------------------
 st.subheader("📄 Report")
 
 if st.button("Generate Report"):
