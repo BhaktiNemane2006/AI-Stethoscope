@@ -8,7 +8,6 @@ from signal_processing import bandpass
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import time
-import os
 
 # -----------------------------
 # DATABASE (SQLite)
@@ -24,7 +23,6 @@ CREATE TABLE IF NOT EXISTS users(
 )
 """)
 
-# Default users
 c.execute("INSERT OR IGNORE INTO users VALUES ('admin','1234','admin')")
 c.execute("INSERT OR IGNORE INTO users VALUES ('doctor','1234','doctor')")
 conn.commit()
@@ -56,7 +54,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # -----------------------------
-# ICU STYLE UI
+# UI STYLE
 # -----------------------------
 st.markdown("""
 <style>
@@ -71,7 +69,7 @@ st.title("💓 AI ICU Heart Monitoring System")
 st.markdown("---")
 
 # -----------------------------
-# FILE UPLOAD + AUDIO
+# FILE UPLOAD
 # -----------------------------
 uploaded_file = st.file_uploader("Upload Heart Sound (.wav)", type=["wav"])
 
@@ -106,13 +104,19 @@ peaks, _ = find_peaks(filtered, distance=50, height=0.2)
 bpm = len(peaks) * 60
 
 # -----------------------------
-# AI LOGIC
+# AI + BPM LOGIC (FIXED)
 # -----------------------------
 energy = np.mean(np.abs(filtered))
 variance = np.var(filtered)
 
 confidence = min((energy + variance) * 3, 1.0)
-status = "Normal" if confidence < 0.6 else "Abnormal"
+
+if bpm < 60 or bpm > 120:
+    status = "Abnormal"
+elif confidence >= 0.7:
+    status = "Abnormal"
+else:
+    status = "Normal"
 
 # -----------------------------
 # DASHBOARD
@@ -129,6 +133,12 @@ else:
     st.error("🔴 Immediate Attention Required")
 
 st.markdown("---")
+
+# -----------------------------
+# CRITICAL ALERT
+# -----------------------------
+if bpm > 150:
+    st.error("🚨 CRITICAL: Extremely high heart rate detected!")
 
 # -----------------------------
 # HISTORY
@@ -149,11 +159,11 @@ st.subheader("📊 AI Probability")
 st.bar_chart({"Normal":1-confidence, "Abnormal":confidence})
 
 # -----------------------------
-# DOCTOR RECOMMENDATION
+# DOCTOR RECOMMENDATION (FIXED)
 # -----------------------------
 st.subheader("🧑‍⚕️ Recommendation")
 
-if confidence < 0.6:
+if status == "Normal":
     st.success("Healthy heart. Maintain lifestyle.")
 else:
     st.error("Consult cardiologist immediately.")
@@ -164,6 +174,7 @@ st.markdown("---")
 # LIVE WAVEFORM
 # -----------------------------
 st.subheader("📈 Live Waveform")
+
 placeholder = st.empty()
 
 for _ in range(8):
@@ -180,7 +191,7 @@ ax.specgram(filtered, Fs=1000)
 st.pyplot(fig)
 
 # -----------------------------
-# PDF REPORT FUNCTION
+# PDF REPORT
 # -----------------------------
 def generate_pdf(name, bpm, status, confidence, signal):
     filename = f"{name}_report.pdf"
@@ -188,29 +199,22 @@ def generate_pdf(name, bpm, status, confidence, signal):
     styles = getSampleStyleSheet()
 
     content = []
-
     content.append(Paragraph(f"Patient: {name}", styles["Normal"]))
     content.append(Paragraph(f"BPM: {bpm}", styles["Normal"]))
     content.append(Paragraph(f"Condition: {status}", styles["Normal"]))
     content.append(Paragraph(f"Confidence: {confidence*100:.2f}%", styles["Normal"]))
 
-    # Save waveform image
     img_path = "waveform.png"
     plt.figure()
     plt.plot(signal)
-    plt.title("Heart Waveform")
     plt.savefig(img_path)
     plt.close()
 
     content.append(Image(img_path, width=400, height=200))
-
     doc.build(content)
 
     return filename
 
-# -----------------------------
-# DOWNLOAD REPORT
-# -----------------------------
 st.subheader("📄 Medical Report")
 
 if st.button("Generate & Download Report"):
