@@ -1,31 +1,55 @@
 import streamlit as st
 import numpy as np
-from signal_processing import bandpass
-from utils import save_recording
-from scipy.signal import find_peaks
-import matplotlib.pyplot as plt
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
-from reportlab.lib.styles import getSampleStyleSheet
+import sqlite3
 import librosa
-import os
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
+from signal_processing import bandpass
 import time
 
 # -----------------------------
-# Login System
+# DATABASE SETUP (SQLite)
+# -----------------------------
+conn = sqlite3.connect("users.db", check_same_thread=False)
+c = conn.cursor()
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS users(
+    username TEXT,
+    password TEXT,
+    role TEXT
+)
+""")
+
+# Default users
+c.execute("INSERT OR IGNORE INTO users VALUES ('admin','1234','admin')")
+c.execute("INSERT OR IGNORE INTO users VALUES ('doctor','1234','doctor')")
+conn.commit()
+
+# -----------------------------
+# LOGIN SYSTEM
 # -----------------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+    st.session_state.role = ""
 
 if not st.session_state.logged_in:
-    st.title("🔐 Login")
+    st.title("🔐 Login System")
+
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if username == "admin" and password == "1234":
+        c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+        user = c.fetchone()
+
+        if user:
             st.session_state.logged_in = True
+            st.session_state.role = user[2]
+            st.success(f"Welcome {user[2]} 👨‍⚕️")
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid login")
+
     st.stop()
 
 # -----------------------------
@@ -35,35 +59,37 @@ st.markdown("""
 <style>
 body {background-color:black; color:#00FF00;}
 .stApp {background-color:black;}
+h1,h2,h3 {color:#00FF00;}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("💓 ICU Heart Monitor")
 
 # -----------------------------
-# File Upload
+# FILE UPLOAD + AUDIO PLAYBACK
 # -----------------------------
-uploaded_file = st.file_uploader("Upload Heart Sound (.wav)", type=["wav"])
+uploaded_file = st.file_uploader("Upload Heart Sound", type=["wav"])
+
+if uploaded_file:
+    st.audio(uploaded_file)
 
 # -----------------------------
-# Patient Info
+# PATIENT INFO
 # -----------------------------
-st.sidebar.title("🧑‍⚕️ Patient Info")
-patient_name = st.sidebar.text_input("Name")
-age = st.sidebar.number_input("Age", 1, 120)
+patient_name = st.sidebar.text_input("Patient Name")
 
 # -----------------------------
-# Signal
+# SIGNAL
 # -----------------------------
-def generate_heart_signal():
-    t = np.linspace(0, 1, 300)
+def generate_signal():
+    t = np.linspace(0,1,300)
     return np.sin(2*np.pi*2*t) + np.random.normal(0,0.1,300)
 
 if uploaded_file:
     y, sr = librosa.load(uploaded_file, sr=1000)
     raw_data = y[:2000]
 else:
-    raw_data = generate_heart_signal()
+    raw_data = generate_signal()
 
 filtered = bandpass(np.array(raw_data))
 filtered = filtered / (np.max(np.abs(filtered)) + 1e-6)
@@ -75,23 +101,22 @@ peaks, _ = find_peaks(filtered, distance=50, height=0.2)
 bpm = len(peaks) * 60
 
 # -----------------------------
-# Improved AI (better logic)
+# AI LOGIC (Improved)
 # -----------------------------
-variance = np.var(filtered)
 energy = np.mean(np.abs(filtered))
+variance = np.var(filtered)
 
 confidence = min((energy + variance) * 3, 1.0)
-
-prediction = "Normal" if confidence < 0.6 else "Abnormal"
+status = "Normal" if confidence < 0.6 else "Abnormal"
 
 # -----------------------------
-# Dashboard
+# DASHBOARD
 # -----------------------------
 col1, col2 = st.columns(2)
 
 col1.metric("❤️ BPM", bpm)
 
-if prediction == "Normal":
+if status == "Normal":
     col2.success("🟢 Normal")
 else:
     col2.error("🔴 Abnormal")
@@ -99,13 +124,25 @@ else:
 st.metric("🧠 Confidence", f"{confidence*100:.2f}%")
 
 # -----------------------------
-# Probability Graph
+# HISTORY (SESSION)
+# -----------------------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+st.session_state.history.append(bpm)
+st.session_state.history = st.session_state.history[-10:]
+
+st.subheader("📊 BPM History")
+st.line_chart(st.session_state.history)
+
+# -----------------------------
+# PROBABILITY GRAPH
 # -----------------------------
 st.subheader("📊 AI Probability")
 st.bar_chart({"Normal":1-confidence, "Abnormal":confidence})
 
 # -----------------------------
-# Doctor Recommendation
+# DOCTOR RECOMMENDATION
 # -----------------------------
 st.subheader("🧑‍⚕️ Recommendation")
 
@@ -115,69 +152,44 @@ else:
     st.error("Consult cardiologist immediately.")
 
 # -----------------------------
-# Waveform Animation (ICU)
+# LIVE WAVEFORM (ICU STYLE)
 # -----------------------------
 st.subheader("📈 Live Waveform")
+
 placeholder = st.empty()
 
-for _ in range(10):
-    placeholder.line_chart(generate_heart_signal())
+for _ in range(8):
+    placeholder.line_chart(generate_signal())
     time.sleep(0.1)
 
 # -----------------------------
-# Spectrogram
+# SPECTROGRAM
 # -----------------------------
 st.subheader("📊 Spectrogram")
+
 fig, ax = plt.subplots()
 ax.specgram(filtered, Fs=1000)
 st.pyplot(fig)
 
 # -----------------------------
-# MULTIPLE PATIENT RECORDS
+# ROLE-BASED ACCESS
 # -----------------------------
-if "records" not in st.session_state:
-    st.session_state.records = []
+if st.session_state.role == "admin":
+    st.subheader("⚙ Admin Panel")
 
-if st.button("💾 Save Patient Record"):
-    st.session_state.records.append({
-        "name": patient_name,
-        "bpm": bpm,
-        "status": prediction
-    })
+    new_user = st.text_input("New Username")
+    new_pass = st.text_input("New Password")
+    new_role = st.selectbox("Role", ["doctor","admin"])
 
-st.subheader("📁 Patient Records")
-
-for r in st.session_state.records:
-    st.write(r)
+    if st.button("Add User"):
+        c.execute("INSERT INTO users VALUES (?,?,?)", (new_user, new_pass, new_role))
+        conn.commit()
+        st.success("User Added")
 
 # -----------------------------
-# PDF REPORT WITH GRAPH
+# LOGOUT
 # -----------------------------
-def generate_pdf(name, bpm, status):
-    filename = f"{name}_report.pdf"
-
-    doc = SimpleDocTemplate(filename)
-    styles = getSampleStyleSheet()
-
-    content = []
-    content.append(Paragraph(f"Patient: {name}", styles["Normal"]))
-    content.append(Paragraph(f"BPM: {bpm}", styles["Normal"]))
-    content.append(Paragraph(f"Condition: {status}", styles["Normal"]))
-
-    # Save graph image
-    img_path = "temp_plot.png"
-    plt.figure()
-    plt.plot(filtered)
-    plt.savefig(img_path)
-    plt.close()
-
-    content.append(Image(img_path, width=300, height=150))
-
-    doc.build(content)
-    return filename
-
-if st.button("📄 Generate Report"):
-    file = generate_pdf(patient_name, bpm, prediction)
-    with open(file, "rb") as f:
-        st.download_button("⬇ Download Report", f, file_name=file)
+if st.button("Logout"):
+    st.session_state.logged_in = False
+    st.rerun()
     
