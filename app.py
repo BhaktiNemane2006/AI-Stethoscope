@@ -11,16 +11,6 @@ import av
 import csv
 import os
 import pandas as pd
-st.subheader("🧠 AI Confidence Level")
-
-st.progress(float(confidence))
-
-if confidence > 0.8:
-    st.success("High confidence prediction")
-elif confidence > 0.5:
-    st.warning("Moderate confidence")
-else:
-    st.error("Low confidence")
 
 st.set_page_config(layout="wide")
 st.subheader("📡 Signal Quality")
