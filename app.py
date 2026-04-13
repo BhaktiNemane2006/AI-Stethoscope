@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, butter, filtfilt
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
 from reportlab.lib.styles import getSampleStyleSheet
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import av
-import time
+from streamlit_webrtc import webrtc_streamer
 
 # -----------------------------
-# AUDIO BUFFER (REAL-TIME)
-# -----------------------------
+# AUDIO BUFFER
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
+import av
+
 st.subheader("🎤 Live Mic (Browser)")
 
 if "audio_data" not in st.session_state:
@@ -21,23 +21,25 @@ if "audio_data" not in st.session_state:
 def audio_callback(frame: av.AudioFrame):
     audio = frame.to_ndarray().flatten().astype(np.float32)
 
+    # normalize
     audio = audio / (np.max(np.abs(audio)) + 1e-6)
 
+    # store in session
     st.session_state.audio_data = np.concatenate(
         (st.session_state.audio_data, audio)
     )
 
+    # keep only last 2 sec
     st.session_state.audio_data = st.session_state.audio_data[-2000:]
 
     return frame
 
-webrtc_streamer(
+webrtc_ctx = webrtc_streamer(
     key="mic",
     mode=WebRtcMode.SENDONLY,
     audio_frame_callback=audio_callback,
     media_stream_constraints={"audio": True, "video": False},
 )
-
 # -----------------------------
 # DATABASE
 # -----------------------------
@@ -77,7 +79,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # -----------------------------
-# UI
+# UI STYLE
 # -----------------------------
 st.markdown("""
 <style>
@@ -98,74 +100,103 @@ age = st.sidebar.number_input("Age", 1, 120)
 gender = st.sidebar.selectbox("Gender", ["Male","Female","Other"])
 
 # -----------------------------
-# FILTER FUNCTION
+# INPUT
+# -----------------------------
+uploaded_file = st.file_uploader("Upload (.wav)", type=["wav"])
+
+if len(st.session_state.audio_data) > 500:
+    raw = st.session_state.audio_data
+
+elif uploaded_file:
+    y, sr = librosa.load(uploaded_file, sr=1000)
+    raw = y[:2000]
+
+else:
+    t = np.linspace(0,1,300)
+    raw = np.sin(2*np.pi*2*t)
+if st.button("🔄 Refresh Signal"):
+    st.rerun()
+# -----------------------------
+# FILTER
 # -----------------------------
 def heart_filter(sig):
     b,a = butter(3,[20/500,150/500],btype='band')
     return filtfilt(b,a,sig)
 
-# -----------------------------
-# REAL-TIME DISPLAY LOOP 🔥
-# -----------------------------
-placeholder = st.empty()
-
-while True:
-
-    # INPUT SOURCE
-    if len(st.session_state.audio_data) > 500:
-        raw = st.session_state.audio_data
-    else:
-        raw = np.zeros(300)
-
-    # FILTER
-    filtered = heart_filter(raw)
-    filtered = filtered / (np.max(np.abs(filtered))+1e-6)
-
-    # BPM
-    peaks,_ = find_peaks(filtered, distance=80, prominence=0.3)
-
-    if len(peaks)>1:
-        bpm = int(60*1000/np.mean(np.diff(peaks)))
-    else:
-        bpm = 0
-
-    # FEATURES
-    variance = np.var(filtered)
-    noise = np.std(filtered)
-
-    # CLASSIFICATION
-    if bpm<50 or bpm>130:
-        label = "Extrastole"
-    elif variance>0.5:
-        label = "Murmur"
-    else:
-        label = "Normal"
-
-    # DISPLAY
-    with placeholder.container():
-
-        c1,c2,c3 = st.columns(3)
-        c1.metric("❤️ BPM", bpm)
-        c2.metric("Noise", f"{noise:.2f}")
-        c3.metric("Condition", label)
-
-        if label=="Normal":
-            st.success("🟢 Normal")
-        elif label=="Murmur":
-            st.warning("🟡 Murmur Detected")
-        else:
-            st.error("🔴 Abnormal Rhythm")
-
-        st.line_chart(filtered)
-
-        fig,ax = plt.subplots()
-        ax.specgram(filtered,Fs=1000)
-        st.pyplot(fig)
-
-    time.sleep(0.3)
+filtered = heart_filter(raw)
+filtered = filtered / (np.max(np.abs(filtered))+1e-6)
 
 # -----------------------------
-# PDF REPORT (STATIC)
+# BPM
+# -----------------------------
+peaks,_ = find_peaks(filtered, distance=80, prominence=0.3)
+
+if len(peaks)>1:
+    bpm = int(60*1000/np.mean(np.diff(peaks)))
+else:
+    bpm = 0
+
+# -----------------------------
+# FEATURES
+# -----------------------------
+energy = np.mean(np.abs(filtered))
+variance = np.var(filtered)
+noise = np.std(filtered)
+
+# -----------------------------
+# PCG CLASSIFICATION
+# -----------------------------
+if bpm<50 or bpm>130:
+    label = "Extrastole"
+elif variance>0.5:
+    label = "Murmur"
+else:
+    label = "Normal"
+
+# -----------------------------
+# STATUS
+# -----------------------------
+if label=="Normal":
+    status="🟢 Normal"
+elif label=="Murmur":
+    status="🟡 Murmur Detected"
+else:
+    status="🔴 Abnormal Rhythm"
+
+# -----------------------------
+# DASHBOARD
+# -----------------------------
+c1,c2,c3 = st.columns(3)
+
+c1.metric("❤️ BPM", bpm)
+c2.metric("Noise", f"{noise:.2f}")
+c3.metric("Condition", label)
+
+st.success(status if label=="Normal" else status)
+
+# -----------------------------
+# WAVEFORM
+# -----------------------------
+st.subheader("📈 Waveform")
+st.line_chart(filtered)
+
+# -----------------------------
+# SPECTROGRAM
+# -----------------------------
+st.subheader("📊 Spectrogram")
+
+fig,ax = plt.subplots()
+ax.specgram(filtered,Fs=1000)
+st.pyplot(fig)
+
+# -----------------------------
+# MURMUR ALERT
+# -----------------------------
+if label=="Murmur":
+    st.warning("⚠ Possible murmur detected")
+
+# -----------------------------
+# PDF REPORT
 # -----------------------------
 def generate_pdf():
     file=f"{name}_report.pdf"
@@ -189,4 +220,14 @@ def generate_pdf():
     doc.build(content)
 
     return file
+
+# -----------------------------
+# DOWNLOAD REPORT
+# -----------------------------
+st.subheader("📄 Report")
+
+if st.button("Generate Report"):
+    f=generate_pdf()
+    with open(f,"rb") as file:
+        st.download_button("⬇ Download", file, file_name=f)
     
