@@ -3,15 +3,13 @@ import numpy as np
 import sqlite3
 import librosa
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
-from signal_processing import bandpass
+from scipy.signal import find_peaks, butter, filtfilt
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
 from reportlab.lib.styles import getSampleStyleSheet
-import time
 from streamlit_webrtc import webrtc_streamer
 
 # -----------------------------
-# AUDIO BUFFER (FIXED)
+# AUDIO BUFFER
 # -----------------------------
 if "audio_buffer" not in st.session_state:
     st.session_state.audio_buffer = []
@@ -19,8 +17,6 @@ if "audio_buffer" not in st.session_state:
 def audio_callback(frame):
     audio = frame.to_ndarray().flatten()
     st.session_state.audio_buffer.extend(audio.tolist())
-
-    # keep only latest data (avoid overflow)
     st.session_state.audio_buffer = st.session_state.audio_buffer[-2000:]
     return frame
 
@@ -46,7 +42,6 @@ CREATE TABLE IF NOT EXISTS users(
 """)
 
 c.execute("INSERT OR IGNORE INTO users VALUES ('admin','1234','admin')")
-c.execute("INSERT OR IGNORE INTO users VALUES ('doctor','1234','doctor')")
 conn.commit()
 
 # -----------------------------
@@ -54,133 +49,169 @@ conn.commit()
 # -----------------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.role = ""
 
 if not st.session_state.logged_in:
-    st.title("🔐 Login System")
+    st.title("🔐 Login")
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-        user = c.fetchone()
-
-        if user:
+        c.execute("SELECT * FROM users WHERE username=? AND password=?", (u,p))
+        if c.fetchone():
             st.session_state.logged_in = True
-            st.session_state.role = user[2]
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid")
 
     st.stop()
 
 # -----------------------------
-# UI
+# UI STYLE
 # -----------------------------
 st.markdown("""
 <style>
-body {background-color:#000000; color:#00FFAA;}
-.stApp {background-color:#000000;}
-h1,h2,h3 {color:#00FFAA; text-align:center;}
+body {background:#000; color:#00FFAA;}
+h1,h2,h3 {text-align:center;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💓 AI ICU Heart Monitoring System")
+st.title("💓 AI Heart Monitoring System")
 
 # -----------------------------
-# INPUT SOURCE
+# PATIENT INFO
 # -----------------------------
-uploaded_file = st.file_uploader("Upload Heart Sound (.wav)", type=["wav"])
+st.sidebar.header("🧑‍⚕️ Patient Info")
 
-# 🔥 PRIORITY: MIC > FILE > DEMO
+name = st.sidebar.text_input("Name")
+age = st.sidebar.number_input("Age", 1, 120)
+gender = st.sidebar.selectbox("Gender", ["Male","Female","Other"])
+
+# -----------------------------
+# INPUT
+# -----------------------------
+uploaded_file = st.file_uploader("Upload (.wav)", type=["wav"])
+
 if len(st.session_state.audio_buffer) > 500:
-    raw_data = np.array(st.session_state.audio_buffer)
-
+    raw = np.array(st.session_state.audio_buffer)
 elif uploaded_file:
     y, sr = librosa.load(uploaded_file, sr=1000)
-    raw_data = y[:2000]
-
+    raw = y[:2000]
 else:
     t = np.linspace(0,1,300)
-    raw_data = np.sin(2*np.pi*2*t)
+    raw = np.sin(2*np.pi*2*t)
 
 # -----------------------------
-# PROCESS SIGNAL
+# FILTER
 # -----------------------------
-filtered = bandpass(np.array(raw_data))
-filtered = filtered / (np.max(np.abs(filtered)) + 1e-6)
+def heart_filter(sig):
+    b,a = butter(3,[20/500,150/500],btype='band')
+    return filtfilt(b,a,sig)
+
+filtered = heart_filter(raw)
+filtered = filtered / (np.max(np.abs(filtered))+1e-6)
 
 # -----------------------------
-# BPM (REAL-TIME)
+# BPM
 # -----------------------------
-peaks, _ = find_peaks(filtered, distance=50, height=0.2)
-bpm = len(peaks) * 60
+peaks,_ = find_peaks(filtered, distance=80, prominence=0.3)
+
+if len(peaks)>1:
+    bpm = int(60*1000/np.mean(np.diff(peaks)))
+else:
+    bpm = 0
 
 # -----------------------------
-# AI (REAL-TIME)
+# FEATURES
 # -----------------------------
 energy = np.mean(np.abs(filtered))
 variance = np.var(filtered)
+noise = np.std(filtered)
 
-confidence = min((energy + variance) * 3, 1.0)
-
-if bpm < 60 or bpm > 120:
-    status = "Abnormal"
-elif confidence > 0.7:
-    status = "Abnormal"
+# -----------------------------
+# PCG CLASSIFICATION
+# -----------------------------
+if bpm<50 or bpm>130:
+    label = "Extrastole"
+elif variance>0.5:
+    label = "Murmur"
 else:
-    status = "Normal"
+    label = "Normal"
+
+# -----------------------------
+# STATUS
+# -----------------------------
+if label=="Normal":
+    status="🟢 Normal"
+elif label=="Murmur":
+    status="🟡 Murmur Detected"
+else:
+    status="🔴 Abnormal Rhythm"
 
 # -----------------------------
 # DASHBOARD
 # -----------------------------
-col1, col2, col3 = st.columns(3)
+c1,c2,c3 = st.columns(3)
 
-col1.metric("❤️ BPM", bpm)
-col2.metric("🧠 Confidence", f"{confidence*100:.1f}%")
-col3.metric("📡 Status", status)
+c1.metric("❤️ BPM", bpm)
+c2.metric("Noise", f"{noise:.2f}")
+c3.metric("Condition", label)
 
-if bpm > 150:
-    st.error("🚨 CRITICAL ALERT!")
+st.success(status if label=="Normal" else status)
 
 # -----------------------------
-# WAVEFORM (REAL MIC)
+# WAVEFORM
 # -----------------------------
-st.subheader("📈 Live Waveform")
+st.subheader("📈 Waveform")
 st.line_chart(filtered)
-
-# -----------------------------
-# HISTORY
-# -----------------------------
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-st.session_state.history.append(bpm)
-st.session_state.history = st.session_state.history[-10:]
-
-st.subheader("📊 BPM History")
-st.line_chart(st.session_state.history)
-
-# -----------------------------
-# AI GRAPH
-# -----------------------------
-st.subheader("📊 AI Probability")
-st.bar_chart({"Normal":1-confidence, "Abnormal":confidence})
-
-# -----------------------------
-# RECOMMENDATION
-# -----------------------------
-st.subheader("🧑‍⚕️ Recommendation")
-
-if status == "Normal":
-    st.success("Healthy heart")
-else:
-    st.error("Consult doctor")
 
 # -----------------------------
 # SPECTROGRAM
 # -----------------------------
-fig, ax = plt.subplots()
-ax.specgram(filtered, Fs=1000)
+st.subheader("📊 Spectrogram")
+
+fig,ax = plt.subplots()
+ax.specgram(filtered,Fs=1000)
 st.pyplot(fig)
+
+# -----------------------------
+# MURMUR ALERT
+# -----------------------------
+if label=="Murmur":
+    st.warning("⚠ Possible murmur detected")
+
+# -----------------------------
+# PDF REPORT
+# -----------------------------
+def generate_pdf():
+    file=f"{name}_report.pdf"
+    doc=SimpleDocTemplate(file)
+    styles=getSampleStyleSheet()
+
+    content=[]
+    content.append(Paragraph(f"Name: {name}",styles["Normal"]))
+    content.append(Paragraph(f"Age: {age}",styles["Normal"]))
+    content.append(Paragraph(f"Gender: {gender}",styles["Normal"]))
+    content.append(Paragraph(f"BPM: {bpm}",styles["Normal"]))
+    content.append(Paragraph(f"Condition: {label}",styles["Normal"]))
+
+    img="plot.png"
+    plt.figure()
+    plt.plot(filtered)
+    plt.savefig(img)
+    plt.close()
+
+    content.append(Image(img, width=400, height=200))
+    doc.build(content)
+
+    return file
+
+# -----------------------------
+# DOWNLOAD REPORT
+# -----------------------------
+st.subheader("📄 Report")
+
+if st.button("Generate Report"):
+    f=generate_pdf()
+    with open(f,"rb") as file:
+        st.download_button("⬇ Download", file, file_name=f)
     
