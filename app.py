@@ -5,17 +5,20 @@ import librosa
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from signal_processing import bandpass
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
+from reportlab.lib.styles import getSampleStyleSheet
 import time
+import os
 
 # -----------------------------
-# DATABASE SETUP (SQLite)
+# DATABASE (SQLite)
 # -----------------------------
 conn = sqlite3.connect("users.db", check_same_thread=False)
 c = conn.cursor()
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS users(
-    username TEXT,
+    username TEXT PRIMARY KEY,
     password TEXT,
     role TEXT
 )
@@ -48,27 +51,29 @@ if not st.session_state.logged_in:
             st.session_state.role = user[2]
             st.success(f"Welcome {user[2]} 👨‍⚕️")
         else:
-            st.error("Invalid login")
+            st.error("Invalid credentials")
 
     st.stop()
 
 # -----------------------------
-# UI STYLE (ICU)
+# ICU STYLE UI
 # -----------------------------
 st.markdown("""
 <style>
-body {background-color:black; color:#00FF00;}
-.stApp {background-color:black;}
-h1,h2,h3 {color:#00FF00;}
+body {background-color:#000000; color:#00FFAA;}
+.stApp {background-color:#000000;}
+h1,h2,h3 {color:#00FFAA; text-align:center;}
+.stMetric {font-size:28px !important; color:#00FFAA !important;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💓 ICU Heart Monitor")
+st.title("💓 AI ICU Heart Monitoring System")
+st.markdown("---")
 
 # -----------------------------
-# FILE UPLOAD + AUDIO PLAYBACK
+# FILE UPLOAD + AUDIO
 # -----------------------------
-uploaded_file = st.file_uploader("Upload Heart Sound", type=["wav"])
+uploaded_file = st.file_uploader("Upload Heart Sound (.wav)", type=["wav"])
 
 if uploaded_file:
     st.audio(uploaded_file)
@@ -101,7 +106,7 @@ peaks, _ = find_peaks(filtered, distance=50, height=0.2)
 bpm = len(peaks) * 60
 
 # -----------------------------
-# AI LOGIC (Improved)
+# AI LOGIC
 # -----------------------------
 energy = np.mean(np.abs(filtered))
 variance = np.var(filtered)
@@ -112,19 +117,21 @@ status = "Normal" if confidence < 0.6 else "Abnormal"
 # -----------------------------
 # DASHBOARD
 # -----------------------------
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
-col1.metric("❤️ BPM", bpm)
+col1.metric("❤️ Heart Rate", f"{bpm} BPM")
+col2.metric("🧠 Confidence", f"{confidence*100:.1f}%")
+col3.metric("📡 Status", status)
 
 if status == "Normal":
-    col2.success("🟢 Normal")
+    st.success("🟢 Patient Stable")
 else:
-    col2.error("🔴 Abnormal")
+    st.error("🔴 Immediate Attention Required")
 
-st.metric("🧠 Confidence", f"{confidence*100:.2f}%")
+st.markdown("---")
 
 # -----------------------------
-# HISTORY (SESSION)
+# HISTORY
 # -----------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -151,11 +158,12 @@ if confidence < 0.6:
 else:
     st.error("Consult cardiologist immediately.")
 
+st.markdown("---")
+
 # -----------------------------
-# LIVE WAVEFORM (ICU STYLE)
+# LIVE WAVEFORM
 # -----------------------------
 st.subheader("📈 Live Waveform")
-
 placeholder = st.empty()
 
 for _ in range(8):
@@ -172,7 +180,52 @@ ax.specgram(filtered, Fs=1000)
 st.pyplot(fig)
 
 # -----------------------------
-# ROLE-BASED ACCESS
+# PDF REPORT FUNCTION
+# -----------------------------
+def generate_pdf(name, bpm, status, confidence, signal):
+    filename = f"{name}_report.pdf"
+    doc = SimpleDocTemplate(filename)
+    styles = getSampleStyleSheet()
+
+    content = []
+
+    content.append(Paragraph(f"Patient: {name}", styles["Normal"]))
+    content.append(Paragraph(f"BPM: {bpm}", styles["Normal"]))
+    content.append(Paragraph(f"Condition: {status}", styles["Normal"]))
+    content.append(Paragraph(f"Confidence: {confidence*100:.2f}%", styles["Normal"]))
+
+    # Save waveform image
+    img_path = "waveform.png"
+    plt.figure()
+    plt.plot(signal)
+    plt.title("Heart Waveform")
+    plt.savefig(img_path)
+    plt.close()
+
+    content.append(Image(img_path, width=400, height=200))
+
+    doc.build(content)
+
+    return filename
+
+# -----------------------------
+# DOWNLOAD REPORT
+# -----------------------------
+st.subheader("📄 Medical Report")
+
+if st.button("Generate & Download Report"):
+    file = generate_pdf(patient_name, bpm, status, confidence, filtered)
+
+    with open(file, "rb") as f:
+        st.download_button(
+            label="⬇ Download Report",
+            data=f,
+            file_name=file,
+            mime="application/pdf"
+        )
+
+# -----------------------------
+# ADMIN PANEL
 # -----------------------------
 if st.session_state.role == "admin":
     st.subheader("⚙ Admin Panel")
