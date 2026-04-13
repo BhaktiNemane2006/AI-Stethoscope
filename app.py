@@ -9,17 +9,22 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import time
 from streamlit_webrtc import webrtc_streamer
-import numpy as np
 
-audio_buffer = []
+# -----------------------------
+# AUDIO BUFFER (FIXED)
+# -----------------------------
+if "audio_buffer" not in st.session_state:
+    st.session_state.audio_buffer = []
 
 def audio_callback(frame):
     audio = frame.to_ndarray().flatten()
-    audio_buffer.extend(audio)
+    st.session_state.audio_buffer.extend(audio.tolist())
+
+    # keep only latest data (avoid overflow)
+    st.session_state.audio_buffer = st.session_state.audio_buffer[-2000:]
     return frame
 
 st.subheader("🎤 Live Mic (Browser)")
-
 webrtc_streamer(
     key="mic",
     audio_frame_callback=audio_callback,
@@ -27,7 +32,7 @@ webrtc_streamer(
 )
 
 # -----------------------------
-# DATABASE (SQLite)
+# DATABASE
 # -----------------------------
 conn = sqlite3.connect("users.db", check_same_thread=False)
 c = conn.cursor()
@@ -45,7 +50,7 @@ c.execute("INSERT OR IGNORE INTO users VALUES ('doctor','1234','doctor')")
 conn.commit()
 
 # -----------------------------
-# LOGIN SYSTEM
+# LOGIN
 # -----------------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -64,64 +69,55 @@ if not st.session_state.logged_in:
         if user:
             st.session_state.logged_in = True
             st.session_state.role = user[2]
-            st.success(f"Welcome {user[2]} 👨‍⚕️")
         else:
             st.error("Invalid credentials")
 
     st.stop()
 
 # -----------------------------
-# UI STYLE
+# UI
 # -----------------------------
 st.markdown("""
 <style>
 body {background-color:#000000; color:#00FFAA;}
 .stApp {background-color:#000000;}
 h1,h2,h3 {color:#00FFAA; text-align:center;}
-.stMetric {font-size:28px !important; color:#00FFAA !important;}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("💓 AI ICU Heart Monitoring System")
-st.markdown("---")
 
 # -----------------------------
-# FILE UPLOAD
+# INPUT SOURCE
 # -----------------------------
 uploaded_file = st.file_uploader("Upload Heart Sound (.wav)", type=["wav"])
 
-if uploaded_file:
-    st.audio(uploaded_file)
+# 🔥 PRIORITY: MIC > FILE > DEMO
+if len(st.session_state.audio_buffer) > 500:
+    raw_data = np.array(st.session_state.audio_buffer)
 
-# -----------------------------
-# PATIENT INFO
-# -----------------------------
-patient_name = st.sidebar.text_input("Patient Name")
-
-# -----------------------------
-# SIGNAL
-# -----------------------------
-def generate_signal():
-    t = np.linspace(0,1,300)
-    return np.sin(2*np.pi*2*t) + np.random.normal(0,0.1,300)
-
-if uploaded_file:
+elif uploaded_file:
     y, sr = librosa.load(uploaded_file, sr=1000)
     raw_data = y[:2000]
-else:
-    raw_data = generate_signal()
 
+else:
+    t = np.linspace(0,1,300)
+    raw_data = np.sin(2*np.pi*2*t)
+
+# -----------------------------
+# PROCESS SIGNAL
+# -----------------------------
 filtered = bandpass(np.array(raw_data))
 filtered = filtered / (np.max(np.abs(filtered)) + 1e-6)
 
 # -----------------------------
-# BPM
+# BPM (REAL-TIME)
 # -----------------------------
 peaks, _ = find_peaks(filtered, distance=50, height=0.2)
 bpm = len(peaks) * 60
 
 # -----------------------------
-# AI + BPM LOGIC (FIXED)
+# AI (REAL-TIME)
 # -----------------------------
 energy = np.mean(np.abs(filtered))
 variance = np.var(filtered)
@@ -130,7 +126,7 @@ confidence = min((energy + variance) * 3, 1.0)
 
 if bpm < 60 or bpm > 120:
     status = "Abnormal"
-elif confidence >= 0.7:
+elif confidence > 0.7:
     status = "Abnormal"
 else:
     status = "Normal"
@@ -140,22 +136,18 @@ else:
 # -----------------------------
 col1, col2, col3 = st.columns(3)
 
-col1.metric("❤️ Heart Rate", f"{bpm} BPM")
+col1.metric("❤️ BPM", bpm)
 col2.metric("🧠 Confidence", f"{confidence*100:.1f}%")
 col3.metric("📡 Status", status)
 
-if status == "Normal":
-    st.success("🟢 Patient Stable")
-else:
-    st.error("🔴 Immediate Attention Required")
-
-st.markdown("---")
-
-# -----------------------------
-# CRITICAL ALERT
-# -----------------------------
 if bpm > 150:
-    st.error("🚨 CRITICAL: Extremely high heart rate detected!")
+    st.error("🚨 CRITICAL ALERT!")
+
+# -----------------------------
+# WAVEFORM (REAL MIC)
+# -----------------------------
+st.subheader("📈 Live Waveform")
+st.line_chart(filtered)
 
 # -----------------------------
 # HISTORY
@@ -170,100 +162,25 @@ st.subheader("📊 BPM History")
 st.line_chart(st.session_state.history)
 
 # -----------------------------
-# PROBABILITY GRAPH
+# AI GRAPH
 # -----------------------------
 st.subheader("📊 AI Probability")
 st.bar_chart({"Normal":1-confidence, "Abnormal":confidence})
 
 # -----------------------------
-# DOCTOR RECOMMENDATION (FIXED)
+# RECOMMENDATION
 # -----------------------------
 st.subheader("🧑‍⚕️ Recommendation")
 
 if status == "Normal":
-    st.success("Healthy heart. Maintain lifestyle.")
+    st.success("Healthy heart")
 else:
-    st.error("Consult cardiologist immediately.")
-
-st.markdown("---")
-
-# -----------------------------
-# LIVE WAVEFORM
-# -----------------------------
-st.subheader("📈 Live Waveform")
-
-placeholder = st.empty()
-
-for _ in range(8):
-    placeholder.line_chart(generate_signal())
-    time.sleep(0.1)
+    st.error("Consult doctor")
 
 # -----------------------------
 # SPECTROGRAM
 # -----------------------------
-st.subheader("📊 Spectrogram")
-
 fig, ax = plt.subplots()
 ax.specgram(filtered, Fs=1000)
 st.pyplot(fig)
-
-# -----------------------------
-# PDF REPORT
-# -----------------------------
-def generate_pdf(name, bpm, status, confidence, signal):
-    filename = f"{name}_report.pdf"
-    doc = SimpleDocTemplate(filename)
-    styles = getSampleStyleSheet()
-
-    content = []
-    content.append(Paragraph(f"Patient: {name}", styles["Normal"]))
-    content.append(Paragraph(f"BPM: {bpm}", styles["Normal"]))
-    content.append(Paragraph(f"Condition: {status}", styles["Normal"]))
-    content.append(Paragraph(f"Confidence: {confidence*100:.2f}%", styles["Normal"]))
-
-    img_path = "waveform.png"
-    plt.figure()
-    plt.plot(signal)
-    plt.savefig(img_path)
-    plt.close()
-
-    content.append(Image(img_path, width=400, height=200))
-    doc.build(content)
-
-    return filename
-
-st.subheader("📄 Medical Report")
-
-if st.button("Generate & Download Report"):
-    file = generate_pdf(patient_name, bpm, status, confidence, filtered)
-
-    with open(file, "rb") as f:
-        st.download_button(
-            label="⬇ Download Report",
-            data=f,
-            file_name=file,
-            mime="application/pdf"
-        )
-
-# -----------------------------
-# ADMIN PANEL
-# -----------------------------
-if st.session_state.role == "admin":
-    st.subheader("⚙ Admin Panel")
-
-    new_user = st.text_input("New Username")
-    new_pass = st.text_input("New Password")
-    new_role = st.selectbox("Role", ["doctor","admin"])
-
-    if st.button("Add User"):
-        c.execute("INSERT INTO users VALUES (?,?,?)", (new_user, new_pass, new_role))
-        conn.commit()
-        st.success("User Added")
-
-# -----------------------------
-# LOGOUT
-# -----------------------------
-if st.button("Logout"):
-    st.session_state.logged_in = False
-    st.rerun()
     
