@@ -8,6 +8,23 @@ from signal_processing import bandpass
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import time
+from streamlit_webrtc import webrtc_streamer
+import numpy as np
+
+audio_buffer = []
+
+def audio_callback(frame):
+    audio = frame.to_ndarray().flatten()
+    audio_buffer.extend(audio)
+    return frame
+
+st.subheader("🎤 Live Mic (Browser)")
+
+webrtc_streamer(
+    key="mic",
+    audio_frame_callback=audio_callback,
+    media_stream_constraints={"audio": True, "video": False},
+)
 
 # -----------------------------
 # DATABASE (SQLite)
