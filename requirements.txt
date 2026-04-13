@@ -5,3 +5,4 @@ matplotlib
 librosa
 scikit-learn
 reportlab
+streamlit-webrtc
