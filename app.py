@@ -12,15 +12,7 @@ import csv
 import os
 import pandas as pd
 
-st.set_page_config(layout="wide")
-st.subheader("📡 Signal Quality")
 
-if noise < 0.1:
-    st.success("Excellent signal quality")
-elif noise < 0.3:
-    st.warning("Moderate noise")
-else:
-    st.error("Poor signal, adjust sensor")
 st.subheader("🫀 Heart Beat Markers")
 
 import matplotlib.pyplot as plt
@@ -210,7 +202,17 @@ if arrhythmia:
 # -----------------------------
 variance = np.var(filtered)
 noise = np.std(filtered)
+# -----------------------------
+# SIGNAL QUALITY (NOW SAFE)
+# -----------------------------
+st.subheader("📡 Signal Quality")
 
+if noise < 0.1:
+    st.success("Excellent signal quality")
+elif noise < 0.3:
+    st.warning("Moderate noise")
+else:
+    st.error("Poor signal, adjust sensor")
 # -----------------------------
 # CLASSIFICATION
 # -----------------------------
