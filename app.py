@@ -260,8 +260,30 @@ if os.path.exists("history.csv"):
 # -----------------------------
 # WAVEFORM
 # -----------------------------
-st.subheader("📈 Waveform")
-st.line_chart(filtered[-300:])
+st.subheader("📈 Live Waveform")
+
+placeholder = st.empty()
+for _ in range(100):
+    
+    if len(st.session_state.audio_data) > 500:
+        raw = st.session_state.audio_data
+    else:
+        raw = np.zeros(300)
+
+    filtered = heart_filter(raw)
+    filtered = filtered / (np.max(np.abs(filtered)) + 1e-6)
+
+    peaks, _ = find_peaks(filtered, distance=80, prominence=0.3)
+
+    if len(peaks) > 1:
+        bpm = int(60 * 1000 / np.mean(np.diff(peaks)))
+    else:
+        bpm = 0
+
+    with placeholder.container():
+        st.line_chart(filtered[-300:])
+
+    time.sleep(0.2)
 # -----------------------------
 # PLAY RECORDED AUDIO
 # -----------------------------
