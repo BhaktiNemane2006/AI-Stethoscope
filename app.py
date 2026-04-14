@@ -12,7 +12,7 @@ import csv
 import os
 import pandas as pd
 import time
-
+import soundfile as sf
 st.set_page_config(layout="wide")
 
 # -----------------------------
@@ -103,7 +103,12 @@ gender = st.sidebar.selectbox("Gender", ["Male","Female","Other"])
 # INPUT
 # -----------------------------
 uploaded_file = st.file_uploader("Upload (.wav)", type=["wav"])
-
+# -----------------------------
+# PLAY UPLOADED AUDIO
+# -----------------------------
+if uploaded_file is not None:
+    st.subheader("🎧 Uploaded Audio Playback")
+    st.audio(uploaded_file, format="audio/wav")
 if len(st.session_state.audio_data) > 500:
     raw = st.session_state.audio_data
 elif uploaded_file:
@@ -257,7 +262,17 @@ if os.path.exists("history.csv"):
 # -----------------------------
 st.subheader("📈 Waveform")
 st.line_chart(filtered[-300:])
+# -----------------------------
+# PLAY RECORDED AUDIO
+# -----------------------------
+st.subheader("🔊 Playback")
 
+if st.button("Play Recorded Sound"):
+    if len(st.session_state.audio_data) > 500:
+        audio_file = save_temp_audio(st.session_state.audio_data)
+        st.audio(audio_file)
+    else:
+        st.warning("No audio recorded yet")
 # -----------------------------
 # ADVANCED GRAPHS
 # -----------------------------
@@ -311,6 +326,13 @@ st.markdown(
 )
 
 # -----------------------------
+# SAVE TEMP AUDIO (MIC)
+# -----------------------------
+def save_temp_audio(data):
+    file = "temp_audio.wav"
+    sf.write(file, data, 1000)
+    return file
+# -----------------------------
 # REPORT
 # -----------------------------
 def generate_pdf():
@@ -343,4 +365,3 @@ if st.button("Generate Report"):
     f=generate_pdf()
     with open(f,"rb") as file:
         st.download_button("⬇ Download", file, file_name=f)
-    
